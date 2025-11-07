@@ -2,15 +2,34 @@
 
 Gemini AI destekli Almanca cümle kurucu Flutter uygulaması.
 
-## 🔧 503 API Hatası - ÇÖZÜLMÜŞTİR ✅
+## ✨ Yeni Özellikler
 
-### Yapılan Düzeltmeler:
+### 🔐 Güvenlik İyileştirmeleri
+- ✅ API anahtarı environment variable'da saklanıyor
+- ✅ `.env` dosyası ile güvenli yapılandırma
+- ✅ Hardcoded API anahtarları kaldırıldı
 
-1. ✅ **Model adı güncellendi:** `gemini-pro-latest` → `gemini-1.5-flash`
-2. ✅ **Timeout eklendi:** 30 saniye timeout süresi
-3. ✅ **Gelişmiş hata yönetimi:** 503, 429, 401, 400 hataları için özel mesajlar
-4. ✅ **Güvenlik:** API anahtarı placeholder ile değiştirildi
-5. ✅ **Resmi paket eklendi:** `google_generative_ai` paketi `pubspec.yaml`'a eklendi
+### 🏗️ Modüler Mimari
+- ✅ Temiz klasör yapısı (models, services, screens, widgets, utils, constants)
+- ✅ Ayrı model dosyaları
+- ✅ Servislerin ayrıştırılması
+- ✅ Yeniden kullanılabilir bileşenler
+
+### 🧪 Test Altyapısı
+- ✅ Model testleri
+- ✅ Servis testleri
+- ✅ Sabitler testleri
+- ✅ Unit test kapsamı
+
+### 📦 State Management
+- ✅ Flutter Riverpod entegrasyonu
+- ✅ Provider yapısı
+
+### 📚 Dokümantasyon
+- ✅ MIT License
+- ✅ CONTRIBUTING.md
+- ✅ Güncellenmiş README
+- ✅ Türkçe kod yorumları
 
 ## 🚀 Kurulum
 
@@ -26,24 +45,32 @@ flutter pub get
 2. "Create API Key" butonuna tıklayın
 3. API anahtarınızı kopyalayın
 
-### 3. API Anahtarını Ekleyin
+### 3. Ortam Değişkenlerini Ayarlayın
 
-`lib/main.dart` dosyasında **475. satırı** bulun:
+`.env.example` dosyasını `.env` olarak kopyalayın:
 
-```dart
-static const String _geminiApiKey = 'BURAYA_API_ANAHTARINIZI_GIRIN';
+```bash
+cp .env.example .env
 ```
 
-Kendi API anahtarınızla değiştirin:
+`.env` dosyasını düzenleyin ve API anahtarınızı ekleyin:
 
-```dart
-static const String _geminiApiKey = 'AIza...'; // Sizin API anahtarınız
+```env
+GEMINI_API_KEY=AIza...
 ```
+
+**⚠️ Önemli:** `.env` dosyası `.gitignore`'da olduğu için Git'e eklenmeyecektir. API anahtarınızı asla paylaşmayın!
 
 ### 4. Uygulamayı Çalıştırın
 
 ```bash
 flutter run
+```
+
+### 5. Testleri Çalıştırın
+
+```bash
+flutter test
 ```
 
 ## 📱 Özellikler
@@ -100,9 +127,35 @@ Daha güvenli bir yöntem için `API_KURULUM.md` dosyasına bakın.
 
 ```
 lib/
-  └── main.dart          # Ana uygulama dosyası
-pubspec.yaml             # Bağımlılıklar
-API_KURULUM.md          # Detaylı kurulum rehberi
+  ├── models/          # Veri modelleri
+  │   └── word.dart    # Kelime modeli
+  ├── services/        # API servisleri
+  │   └── gemini_service.dart  # Gemini AI servisi
+  ├── screens/         # Ekranlar
+  │   └── (gelecekte eklenecek)
+  ├── widgets/         # Yeniden kullanılabilir bileşenler
+  │   └── (gelecekte eklenecek)
+  ├── utils/           # Yardımcı fonksiyonlar
+  │   └── (gelecekte eklenecek)
+  ├── constants/       # Uygulama sabitleri
+  │   └── german_words.dart  # Almanca kelime listeleri
+  ├── providers/       # State management (Riverpod)
+  │   └── (gelecekte eklenecek)
+  └── main.dart        # Ana uygulama dosyası
+
+test/
+  ├── models/          # Model testleri
+  │   └── word_test.dart
+  ├── services/        # Servis testleri
+  │   └── gemini_service_test.dart
+  └── constants/       # Sabitler testleri
+      └── german_words_test.dart
+
+.env                   # Environment variables (GIT'E EKLENMEMELİ)
+.env.example           # Environment variables şablonu
+pubspec.yaml           # Bağımlılıklar
+LICENSE                # MIT License
+CONTRIBUTING.md        # Katkı rehberi
 ```
 
 ## 🤝 Katkıda Bulunma
