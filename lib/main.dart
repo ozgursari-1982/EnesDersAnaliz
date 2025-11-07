@@ -1,63 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'dart:async';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class Word {
-  final String text;
-  final String type; // e.g., 'pronoun', 'verb', 'noun', 'adverb', 'conjunction'
-  final Map<String, dynamic> properties;
+// Modüller
+import 'models/word.dart';
+import 'constants/german_words.dart';
+import 'services/gemini_service.dart';
 
-  Word({required this.text, required this.type, this.properties = const {}});
-
-  @override
-  String toString() => text;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Word &&
-          runtimeType == other.runtimeType &&
-          text == other.text &&
-          type == other.type &&
-          _mapEquals(properties, other.properties); // Map karşılaştırması için yardımcı fonk.
-
-  @override
-  int get hashCode => Object.hash(text, type, properties.entries.map((e) => Object.hash(e.key, e.value) as int).fold<int>(0, (prev, curr) => prev ^ curr));
-
-  // properties'den kolayca erişim için getter'lar
-  String? get person => properties?['person'];
-  String? get number => properties?['number'];
-  String? get gender => properties?['gender'];
-  String? get case_ => properties?['case']; // 'case' anahtar kelime olduğu için 'case_' kullandık
-  bool? get isFormal => properties?['isFormal'];
-  String? get infinitive => properties?['infinitive'];
-  Map<String, dynamic>? get conjugations => properties?['conjugations'];
-  String? get auxiliary => properties?['auxiliary'];
-  String? get participle => properties?['participle'];
-  String? get article => properties?['article'];
-  bool? get transitive => properties?['transitive']; // Fiilin nesne alıp almadığı
-  String? get objectCase => properties?['objectCase']; // Fiilin aldığı nesnenin durumu (örn. 'accusative', 'dative')
-  String? get category => properties?['category']; // İsim kategorisi (örn. 'food', 'liquid', 'book')
-  String? get objectCategory => properties?['objectCategory']; // Fiilin tercih ettiği nesne kategorisi
-}
-
-// Harita karşılaştırması için yardımcı fonksiyon
-bool _mapEquals(Map? a, Map? b) {
-  if (a == b) return true;
-  if (a == null || b == null || a.length != b.length) return false;
-  for (final key in a.keys) {
-    if (!b.containsKey(key) || a[key] != b[key]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-void main() {
-  runApp(const MyApp());
+void main() async {
+  // Environment variables'ı yükle
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
+  
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {
@@ -93,388 +49,28 @@ class SentenceBuilderPage extends StatefulWidget {
 }
 
 class _SentenceBuilderPageState extends State<SentenceBuilderPage> {
-  // Zamanlar
-  final List<String> _times = [
-    'Present',
-    'Perfekt',
-    'Präteritum',
-    'Future',
-  ];
+  // Zamanlar listesi - constants'tan alınıyor
+  final List<String> _times = AppConstants.times;
 
   String? _selectedTime;
-  List<Word> _allWords = [
-    Word(text: 'Ich', type: 'pronoun', properties: {'person': '1st', 'number': 'singular', 'case': 'nominative'}),
-    Word(text: 'Du', type: 'pronoun', properties: {'person': '2nd', 'number': 'singular', 'case': 'nominative'}),
-    Word(text: 'Er', type: 'pronoun', properties: {'person': '3rd', 'number': 'singular', 'gender': 'masculine', 'case': 'nominative'}),
-    Word(text: 'Sie', type: 'pronoun', properties: {'person': '3rd', 'number': 'singular', 'gender': 'feminine', 'case': 'nominative'}),
-    Word(text: 'Es', type: 'pronoun', properties: {'person': '3rd', 'number': 'singular', 'gender': 'neuter', 'case': 'nominative'}),
-    Word(text: 'Wir', type: 'pronoun', properties: {'person': '1st', 'number': 'plural', 'case': 'nominative'}),
-    Word(text: 'Ihr', type: 'pronoun', properties: {'person': '2nd', 'number': 'plural', 'case': 'nominative'}),
-    Word(text: 'Sie', type: 'pronoun', properties: {'person': '3rd', 'number': 'plural', 'case': 'nominative', 'isFormal': true}), // Formal Sie
-    Word(text: 'sie', type: 'pronoun', properties: {'person': '3rd', 'number': 'plural', 'case': 'nominative', 'isFormal': false}), // informal sie
-
-    // Akuzatif zamirler (şimdilik sadece 'mich' ve 'dich' ekleyelim)
-    Word(text: 'mich', type: 'pronoun', properties: {'person': '1st', 'number': 'singular', 'case': 'accusative'}),
-    Word(text: 'dich', type: 'pronoun', properties: {'person': '2nd', 'number': 'singular', 'case': 'accusative'}),
-
-    Word(text: 'haben', type: 'verb', properties: {
-      'infinitive': 'haben',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'general', // Genel bir kategori ekledim
-      'conjugations': {
-        'Präsens': {'ich': 'habe', 'du': 'hast', 'er/sie/es': 'hat', 'wir': 'haben', 'ihr': 'habt', 'sie/Sie': 'haben'},
-        'Präteritum': {'ich': 'hatte', 'du': 'hattest', 'er/sie/es': 'hatte', 'wir': 'hatten', 'ihr': 'hattet', 'sie/Sie': 'hatten'},
-        'Perfekt': {'ich': 'habe', 'du': 'hast', 'er/sie/es': 'hat', 'wir': 'haben', 'ihr': 'habt', 'sie/Sie': 'haben'}
-      }
-    }),
-    Word(text: 'sein', type: 'verb', properties: {
-      'infinitive': 'sein',
-      'transitive': false,
-      'objectCategory': 'state_movement', // Durum veya hareket fiilleri için
-      'conjugations': {
-        'Präsens': {'ich': 'bin', 'du': 'bist', 'er/sie/es': 'ist', 'wir': 'sind', 'ihr': 'seid', 'sie/Sie': 'sind'},
-        'Präteritum': {'ich': 'war', 'du': 'warst', 'er/sie/es': 'war', 'wir': 'waren', 'ihr': 'wart', 'sie/Sie': 'waren'},
-        'Perfekt': {'ich': 'bin', 'du': 'bist', 'er/sie/es': 'ist', 'wir': 'sind', 'ihr': 'seid', 'sie/Sie': 'sind'}
-      }
-    }),
-    Word(text: 'essen', type: 'verb', properties: {
-      'infinitive': 'essen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'food',
-      'conjugations': {
-        'Präsens': {'ich': 'esse', 'du': 'isst', 'er/sie/es': 'isst', 'wir': 'essen', 'ihr': 'esst', 'sie/Sie': 'essen'},
-        'Präteritum': {'ich': 'aß', 'du': 'aßt', 'er/sie/es': 'aß', 'wir': 'aßen', 'ihr': 'aßt', 'sie/Sie': 'aßen'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gegessen'}
-      }
-    }),
-    Word(text: 'trinken', type: 'verb', properties: {
-      'infinitive': 'trinken',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'liquid',
-      'conjugations': {
-        'Präsens': {'ich': 'trinke', 'du': 'trinkst', 'er/sie/es': 'trinkt', 'wir': 'trinken', 'ihr': 'trinkt', 'sie/Sie': 'trinken'},
-        'Präteritum': {'ich': 'trank', 'du': 'trankst', 'er/sie/es': 'trank', 'wir': 'tranken', 'ihr': 'trankt', 'sie/Sie': 'tranken'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'getrunken'}
-      }
-    }),
-    Word(text: 'gehen', type: 'verb', properties: {
-      'infinitive': 'gehen',
-      'transitive': false,
-      'objectCategory': 'movement',
-      'conjugations': {
-        'Präsens': {'ich': 'gehe', 'du': 'gehst', 'er/sie/es': 'geht', 'wir': 'gehen', 'ihr': 'geht', 'sie/Sie': 'gehen'},
-        'Präteritum': {'ich': 'ging', 'du': 'gingst', 'er/sie/es': 'ging', 'wir': 'gingen', 'ihr': 'gingt', 'sie/Sie': 'gingen'},
-        'Perfekt': {'auxiliary': 'sein', 'participle': 'gegangen'}
-      }
-    }),
-    Word(text: 'fragen', type: 'verb', properties: {
-      'infinitive': 'fragen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'person_information',
-      'conjugations': {
-        'Präsens': {'ich': 'frage', 'du': 'fragst', 'er/sie/es': 'fragt', 'wir': 'fragen', 'ihr': 'fragt', 'sie/Sie': 'fragen'},
-        'Präteritum': {'ich': 'fragte', 'du': 'fragtest', 'er/sie/es': 'fragte', 'wir': 'fragten', 'ihr': 'fragtet', 'sie/Sie': 'fragten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gefragt'}
-      }
-    }),
-    Word(text: 'helfen', type: 'verb', properties: {
-      'infinitive': 'helfen',
-      'transitive': true,
-      'objectCase': 'dative',
-      'objectCategory': 'person',
-      'conjugations': {
-        'Präsens': {'ich': 'helfe', 'du': 'hilfst', 'er/sie/es': 'hilft', 'wir': 'helfen', 'ihr': 'helft', 'sie/Sie': 'helfen'},
-        'Präteritum': {'ich': 'half', 'du': 'halfst', 'er/sie/es': 'half', 'wir': 'halfen', 'ihr': 'halft', 'sie/Sie': 'halfen'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'geholfen'}
-      }
-    }),
-    Word(text: 'werden', type: 'verb', properties: { // Future tense auxiliary verb
-      'infinitive': 'werden',
-      'objectCategory': 'future_event', // Gelecek zaman için
-      'conjugations': {
-        'Präsens': {'ich': 'werde', 'du': 'wirst', 'er/sie/es': 'wird', 'wir': 'werden', 'ihr': 'werdet', 'sie/Sie': 'werden'},
-        'Präteritum': {'ich': 'wurde', 'du': 'wurdest', 'er/sie/es': 'wurde', 'wir': 'wurden', 'ihr': 'wurdet', 'sie/Sie': 'wurden'}
-      }
-    }),
-
-    Word(text: 'gestern', type: 'adverb', properties: {'time': 'past'}),
-    Word(text: 'heute', type: 'adverb', properties: {'time': 'present'}),
-    Word(text: 'morgen', type: 'adverb', properties: {'time': 'future'}),
-
-    Word(text: 'aufgestanden', type: 'participle', properties: {'verb': 'aufstehen', 'auxiliary': 'sein', 'objectCategory': 'movement'}),
-    Word(text: 'gegessen', type: 'participle', properties: {'verb': 'essen', 'auxiliary': 'haben', 'objectCategory': 'food'}),
-    Word(text: 'getrunken', type: 'participle', properties: {'verb': 'trinken', 'auxiliary': 'haben', 'objectCategory': 'liquid'}),
-    Word(text: 'gegangen', type: 'participle', properties: {'verb': 'gehen', 'auxiliary': 'sein', 'objectCategory': 'movement'}),
-    Word(text: 'gefragt', type: 'participle', properties: {'verb': 'fragen', 'auxiliary': 'haben', 'objectCategory': 'person_information'}),
-    Word(text: 'geholfen', type: 'participle', properties: {'verb': 'helfen', 'auxiliary': 'haben', 'objectCategory': 'person'}),
-    Word(text: 'gefüttert', type: 'participle', properties: {'verb': 'füttern', 'auxiliary': 'haben', 'objectCategory': 'animal'}),
-    Word(text: 'gefahren', type: 'participle', properties: {'verb': 'fahren', 'auxiliary': 'haben', 'objectCategory': 'vehicle'}),
-
-    Word(text: 'Apfel', type: 'noun', properties: {'gender': 'masculine', 'case': 'nominative', 'article': 'der', 'category': 'food'}),
-    Word(text: 'Buch', type: 'noun', properties: {'gender': 'neuter', 'case': 'nominative', 'article': 'das', 'category': 'book_document'}),
-    Word(text: 'Katze', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'animal'}),
-
-    // Akuzatif isimler (örnek olarak)
-    Word(text: 'einen Apfel', type: 'noun', properties: {'gender': 'masculine', 'case': 'accusative', 'article': 'einen', 'category': 'food'}),
-    Word(text: 'ein Buch', type: 'noun', properties: {'gender': 'neuter', 'case': 'accusative', 'article': 'ein', 'category': 'book_document'}),
-    Word(text: 'eine Katze', type: 'noun', properties: {'gender': 'feminine', 'case': 'accusative', 'article': 'eine', 'category': 'animal'}),
-
-    // Datif isimler (örnek olarak)
-    Word(text: 'dem Mann', type: 'noun', properties: {'gender': 'masculine', 'case': 'dative', 'article': 'dem', 'category': 'person'}),
-    Word(text: 'dem Kind', type: 'noun', properties: {'gender': 'neuter', 'case': 'dative', 'article': 'dem', 'category': 'person'}),
-    Word(text: 'der Frau', type: 'noun', properties: {'gender': 'feminine', 'case': 'dative', 'article': 'der', 'category': 'person'}),
-    Word(text: 'sehen', type: 'verb', properties: {
-      'infinitive': 'sehen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'general_object', // Genel bir nesne kategorisi
-      'conjugations': {
-        'Präsens': {'ich': 'sehe', 'du': 'siehst', 'er/sie/es': 'sieht', 'wir': 'sehen', 'ihr': 'seht', 'sie/Sie': 'sehen'},
-        'Präteritum': {'ich': 'sah', 'du': 'sahst', 'er/sie/es': 'sah', 'wir': 'sahen', 'ihr': 'saht', 'sie/Sie': 'sahen'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gesehen'}
-      }
-    }),
-    Word(text: 'gesehen', type: 'participle', properties: {'verb': 'sehen', 'auxiliary': 'haben', 'objectCategory': 'general_object'}),
-    // Yeni fiiller
-    Word(text: 'kaufen', type: 'verb', properties: {
-      'infinitive': 'kaufen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'general_item', // Genel öğe
-      'conjugations': {
-        'Präsens': {'ich': 'kaufe', 'du': 'kaufst', 'er/sie/es': 'kauft', 'wir': 'kaufen', 'ihr': 'kauft', 'sie/Sie': 'kaufen'},
-        'Präteritum': {'ich': 'kaufte', 'du': 'kauftest', 'er/sie/es': 'kaufte', 'wir': 'kauften', 'ihr': 'kauftet', 'sie/Sie': 'kauften'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gekauft'}
-      }
-    }),
-    Word(text: 'lesen', type: 'verb', properties: {
-      'infinitive': 'lesen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'book_document',
-      'conjugations': {
-        'Präsens': {'ich': 'lese', 'du': 'liest', 'er/sie/es': 'liest', 'wir': 'lesen', 'ihr': 'lest', 'sie/Sie': 'lesen'},
-        'Präteritum': {'ich': 'las', 'du': 'last', 'er/sie/es': 'las', 'wir': 'lasen', 'ihr': 'last', 'sie/Sie': 'lasen'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gelesen'}
-      }
-    }),
-    Word(text: 'schreiben', type: 'verb', properties: {
-      'infinitive': 'schreiben',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'text_content', // Metin içeriği
-      'conjugations': {
-        'Präsens': {'ich': 'schreibe', 'du': 'schreibst', 'er/sie/es': 'schreibt', 'wir': 'schreiben', 'ihr': 'schreibt', 'sie/Sie': 'schreiben'},
-        'Präteritum': {'ich': 'schrieb', 'du': 'schriebst', 'er/sie/es': 'schrieb', 'wir': 'schrieben', 'ihr': 'schriebt', 'sie/Sie': 'schrieben'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'geschrieben'}
-      }
-    }),
-    Word(text: 'sprechen', type: 'verb', properties: {
-      'infinitive': 'sprechen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'language_topic', // Dil veya konu
-      'conjugations': {
-        'Präsens': {'ich': 'spreche', 'du': 'sprichst', 'er/sie/es': 'spricht', 'wir': 'sprechen', 'ihr': 'sprecht', 'sie/Sie': 'sprechen'},
-        'Präteritum': {'ich': 'sprach', 'du': 'sprachst', 'er/sie/es': 'sprach', 'wir': 'sprachen', 'ihr': 'spracht', 'sie/Sie': 'sprachen'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gesprochen'}
-      }
-    }),
-    Word(text: 'bleiben', type: 'verb', properties: {
-      'infinitive': 'bleiben',
-      'transitive': false,
-      'objectCategory': 'location_state', // Konum veya durum
-      'conjugations': {
-        'Präsens': {'ich': 'bleibe', 'du': 'bleibst', 'er/sie/es': 'bleibt', 'wir': 'bleiben', 'ihr': 'bleibt', 'sie/Sie': 'bleiben'},
-        'Präteritum': {'ich': 'blieb', 'du': 'bliebst', 'er/sie/es': 'blieb', 'wir': 'blieben', 'ihr': 'bliebt', 'sie/Sie': 'blieben'},
-        'Perfekt': {'auxiliary': 'sein', 'participle': 'geblieben'}
-      }
-    }),
-    // Yeni fiiller: füttern ve fahren
-    Word(text: 'füttern', type: 'verb', properties: {
-      'infinitive': 'füttern',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'animal',
-      'conjugations': {
-        'Präsens': {'ich': 'füttere', 'du': 'fütterst', 'er/sie/es': 'füttert', 'wir': 'füttern', 'ihr': 'füttert', 'sie/Sie': 'füttern'},
-        'Präteritum': {'ich': 'fütterte', 'du': 'füttertest', 'er/sie/es': 'fütterte', 'wir': 'fütterten', 'ihr': 'füttertet', 'sie/Sie': 'fütterten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gefüttert'}
-      }
-    }),
-    Word(text: 'fahren', type: 'verb', properties: {
-      'infinitive': 'fahren',
-      'transitive': true, // Nesne alabilir (örn: ein Auto fahren)
-      'objectCase': 'accusative',
-      'objectCategory': 'vehicle',
-      'conjugations': {
-        'Präsens': {'ich': 'fahre', 'du': 'fährst', 'er/sie/es': 'fährt', 'wir': 'fahren', 'ihr': 'fahrt', 'sie/Sie': 'fahren'},
-        'Präteritum': {'ich': 'fuhr', 'du': 'fuhrst', 'er/sie/es': 'fuhr', 'wir': 'fuhren', 'ihr': 'fuhrt', 'sie/Sie': 'fuhren'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gefahren'} // Nesne aldığında 'haben' kullanılır. Hareketi belirtiyorsa 'sein' olabilir.
-      }
-    }),
-    // Yeni isimler
-    Word(text: 'Haus', type: 'noun', properties: {'gender': 'neuter', 'case': 'nominative', 'article': 'das', 'category': 'building'}),
-    Word(text: 'Auto', type: 'noun', properties: {'gender': 'neuter', 'case': 'nominative', 'article': 'das', 'category': 'vehicle'}),
-    Word(text: 'Lehrer', type: 'noun', properties: {'gender': 'masculine', 'case': 'nominative', 'article': 'der', 'category': 'person'}),
-    Word(text: 'Schüler', type: 'noun', properties: {'gender': 'masculine', 'case': 'nominative', 'article': 'der', 'category': 'person'}),
-    Word(text: 'Freund', type: 'noun', properties: {'gender': 'masculine', 'case': 'nominative', 'article': 'der', 'category': 'person'}),
-    Word(text: 'Freundin', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'person'}),
-    Word(text: 'Schule', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'building'}),
-    Word(text: 'Arbeit', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'activity'}),
-    // Akuzatif isimler (ek)
-    Word(text: 'ein Haus', type: 'noun', properties: {'gender': 'neuter', 'case': 'accusative', 'article': 'ein', 'category': 'building'}),
-    Word(text: 'einen Lehrer', type: 'noun', properties: {'gender': 'masculine', 'case': 'accusative', 'article': 'einen', 'category': 'person'}),
-    Word(text: 'eine Freundin', type: 'noun', properties: {'gender': 'feminine', 'case': 'accusative', 'article': 'eine', 'category': 'person'}),
-    Word(text: 'ein Bier', type: 'noun', properties: {'gender': 'neuter', 'case': 'accusative', 'article': 'ein', 'category': 'liquid'}), // Yeni
-    Word(text: 'ein Auto', type: 'noun', properties: {'gender': 'neuter', 'case': 'accusative', 'article': 'ein', 'category': 'vehicle'}), // Yeni
-    // Datif isimler (ek)
-    Word(text: 'dem Lehrer', type: 'noun', properties: {'gender': 'masculine', 'case': 'dative', 'article': 'dem', 'category': 'person'}),
-    Word(text: 'der Schule', type: 'noun', properties: {'gender': 'feminine', 'case': 'dative', 'article': 'der', 'category': 'building'}),
-    Word(text: 'dem Freund', type: 'noun', properties: {'gender': 'masculine', 'case': 'dative', 'article': 'dem', 'category': 'person'}),
-    Word(text: 'dem Buch', type: 'noun', properties: {'gender': 'neuter', 'case': 'dative', 'article': 'dem', 'category': 'book_document'}),
-    // Bağlaçlar
-    Word(text: 'und', type: 'conjunction', properties: {'connects': 'same_case'}), // Aynı durumdaki cümleleri/kelimeleri bağlar
-    Word(text: 'aber', type: 'conjunction', properties: {'connects': 'same_case'}),
-    Word(text: 'oder', type: 'conjunction', properties: {'connects': 'same_case'}),
-    Word(text: 'weil', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'dass', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'ob', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    // Edatlar (şimdilik sadece basit örnekler)
-    Word(text: 'mit', type: 'preposition', properties: {'case': 'dative'}),
-    Word(text: 'in', type: 'preposition', properties: {'case': 'dative_accusative'}), // İki durumlu edat
-    Word(text: 'für', type: 'preposition', properties: {'case': 'accusative'}),
-    // Yeni bağlaçlar
-    Word(text: 'als', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end', 'context': 'past_single_event'}),
-    Word(text: 'wenn', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end', 'context': 'present_future_repeated_past'}),
-    Word(text: 'bevor', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'nachdem', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'obwohl', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'während', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'da', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'falls', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'solange', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'sobald', type: 'conjunction', properties: {'introduces': 'subordinate_clause', 'verb_position': 'end'}),
-    Word(text: 'denn', type: 'conjunction', properties: {'connects': 'main_clause'}),
-    Word(text: 'sondern', type: 'conjunction', properties: {'connects': 'main_clause'}),
-    Word(text: 'entweder ... oder', type: 'conjunction', properties: {'connects': 'alternatives'}),
-    Word(text: 'weder ... noch', type: 'conjunction', properties: {'connects': 'neg_alternatives'}),
-    Word(text: 'sowohl ... als auch', type: 'conjunction', properties: {'connects': 'both_options'}),
-    // Yeni edatlar
-    Word(text: 'an', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'on_at_vertical'}),
-    Word(text: 'auf', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'on_at_horizontal'}),
-    Word(text: 'hinter', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'behind'}),
-    Word(text: 'neben', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'next_to'}),
-    Word(text: 'über', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'over_above'}),
-    Word(text: 'unter', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'under_below'}),
-    Word(text: 'vor', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'in_front_of_before'}),
-    Word(text: 'zwischen', type: 'preposition', properties: {'case': 'dative_accusative', 'meaning': 'between'}),
-    Word(text: 'durch', type: 'preposition', properties: {'case': 'accusative', 'meaning': 'through'}),
-    Word(text: 'gegen', type: 'preposition', properties: {'case': 'accusative', 'meaning': 'against_towards'}),
-    Word(text: 'ohne', type: 'preposition', properties: {'case': 'accusative', 'meaning': 'without'}),
-    Word(text: 'um', type: 'preposition', properties: {'case': 'accusative', 'meaning': 'around_at_time'}),
-    Word(text: 'aus', type: 'preposition', properties: {'case': 'dative', 'meaning': 'from_out_of'}),
-    Word(text: 'bei', type: 'preposition', properties: {'case': 'dative', 'meaning': 'at_with_near'}),
-    Word(text: 'von', type: 'preposition', properties: {'case': 'dative', 'meaning': 'from_by_of'}),
-    Word(text: 'zu', type: 'preposition', properties: {'case': 'dative', 'meaning': 'to_at_home'}),
-    // Yeni zarflar
-    Word(text: 'oft', type: 'adverb', properties: {'time': 'frequency'}),
-    Word(text: 'manchmal', type: 'adverb', properties: {'time': 'frequency'}),
-    Word(text: 'immer', type: 'adverb', properties: {'time': 'frequency'}),
-    Word(text: 'nie', type: 'adverb', properties: {'time': 'frequency'}),
-    Word(text: 'gern', type: 'adverb', properties: {'manner': 'liking'}),
-    Word(text: 'sehr', type: 'adverb', properties: {'degree': 'very'}),
-    Word(text: 'hier', type: 'adverb', properties: {'place': 'here'}),
-    Word(text: 'dort', type: 'adverb', properties: {'place': 'there'}),
-    Word(text: 'deshalb', type: 'adverb', properties: {'reason': 'therefore'}),
-    // Yeni fiiller
-    Word(text: 'lernen', type: 'verb', properties: {
-      'infinitive': 'lernen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'subject_skill',
-      'conjugations': {
-        'Präsens': {'ich': 'lerne', 'du': 'lernst', 'er/sie/es': 'lernt', 'wir': 'lernen', 'ihr': 'lernt', 'sie/Sie': 'lernen'},
-        'Präteritum': {'ich': 'lernte', 'du': 'lerntest', 'er/sie/es': 'lernte', 'wir': 'lernten', 'ihr': 'lerntet', 'sie/Sie': 'lernten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gelernt'}
-      }
-    }),
-    Word(text: 'studieren', type: 'verb', properties: {
-      'infinitive': 'studieren',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'subject_field',
-      'conjugations': {
-        'Präsens': {'ich': 'studiere', 'du': 'studierst', 'er/sie/es': 'studiert', 'wir': 'studieren', 'ihr': 'studiert', 'sie/Sie': 'studieren'},
-        'Präteritum': {'ich': 'studierte', 'du': 'studiertest', 'er/sie/es': 'studierte', 'wir': 'studierten', 'ihr': 'studiertet', 'sie/Sie': 'studierten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'studiert'}
-      }
-    }),
-    Word(text: 'arbeiten', type: 'verb', properties: {
-      'infinitive': 'arbeiten',
-      'transitive': false,
-      'objectCategory': 'general', // Nesne almaz ama yer/zaman zarfı alabilir
-      'conjugations': {
-        'Präsens': {'ich': 'arbeite', 'du': 'arbeitest', 'er/sie/es': 'arbeitet', 'wir': 'arbeiten', 'ihr': 'arbeitet', 'sie/Sie': 'arbeiten'},
-        'Präteritum': {'ich': 'arbeitete', 'du': 'arbeitetest', 'er/sie/es': 'arbeitete', 'wir': 'arbeiteten', 'ihr': 'arbeitetet', 'sie/Sie': 'arbeiteten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gearbeitet'}
-      }
-    }),
-    Word(text: 'reisen', type: 'verb', properties: {
-      'infinitive': 'reisen',
-      'transitive': false,
-      'objectCategory': 'movement', // Hedef veya yer zarfı alabilir
-      'conjugations': {
-        'Präsens': {'ich': 'reise', 'du': 'reist', 'er/sie/es': 'reist', 'wir': 'reisen', 'ihr': 'reist', 'sie/Sie': 'reisen'},
-        'Präteritum': {'ich': 'reiste', 'du': 'reistest', 'er/sie/es': 'reiste', 'wir': 'reisten', 'ihr': 'reistet', 'sie/Sie': 'reisten'},
-        'Perfekt': {'auxiliary': 'sein', 'participle': 'gereist'} // Yer değişikliği olduğu için 'sein'
-      }
-    }),
-    Word(text: 'wissen', type: 'verb', properties: {
-      'infinitive': 'wissen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'information',
-      'conjugations': {
-        'Präsens': {'ich': 'weiß', 'du': 'weißt', 'er/sie/es': 'weiß', 'wir': 'wissen', 'ihr': 'wisst', 'sie/Sie': 'wissen'},
-        'Präteritum': {'ich': 'wusste', 'du': 'wusstest', 'er/sie/es': 'wusste', 'wir': 'wussten', 'ihr': 'wusstet', 'sie/Sie': 'wussten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gewusst'}
-      }
-    }),
-    Word(text: 'kennen', type: 'verb', properties: {
-      'infinitive': 'kennen',
-      'transitive': true,
-      'objectCase': 'accusative',
-      'objectCategory': 'person_place_thing',
-      'conjugations': {
-        'Präsens': {'ich': 'kenne', 'du': 'kennst', 'er/sie/es': 'kennt', 'wir': 'kennen', 'ihr': 'kennt', 'sie/Sie': 'kennen'},
-        'Präteritum': {'ich': 'kannte', 'du': 'kanntest', 'er/sie/es': 'kannte', 'wir': 'kannten', 'ihr': 'kanntet', 'sie/Sie': 'kannten'},
-        'Perfekt': {'auxiliary': 'haben', 'participle': 'gekannt'}
-      }
-    }),
-    // Yeni isimler
-    Word(text: 'Freude', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'emotion'}),
-    Word(text: 'Glück', type: 'noun', properties: {'gender': 'neuter', 'case': 'nominative', 'article': 'das', 'category': 'abstract'}),
-    Word(text: 'Angst', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'emotion'}),
-    Word(text: 'Zeit', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'time'}),
-    Word(text: 'Geld', type: 'noun', properties: {'gender': 'neuter', 'case': 'nominative', 'article': 'das', 'category': 'finance'}),
-    Word(text: 'Stadt', type: 'noun', properties: {'gender': 'feminine', 'case': 'nominative', 'article': 'die', 'category': 'location'}),
-    Word(text: 'Land', type: 'noun', properties: {'gender': 'neuter', 'case': 'nominative', 'article': 'das', 'category': 'location'}),
-    // Yeni partisip eklemeleri
-    Word(text: 'gelernt', type: 'participle', properties: {'verb': 'lernen', 'auxiliary': 'haben', 'objectCategory': 'subject_skill'}),
-    Word(text: 'studiert', type: 'participle', properties: {'verb': 'studieren', 'auxiliary': 'haben', 'objectCategory': 'subject_field'}),
-    Word(text: 'gearbeitet', type: 'participle', properties: {'verb': 'arbeiten', 'auxiliary': 'haben', 'objectCategory': 'general'}),
-    Word(text: 'gereist', type: 'participle', properties: {'verb': 'reisen', 'auxiliary': 'sein', 'objectCategory': 'movement'}),
-    Word(text: 'gewusst', type: 'participle', properties: {'verb': 'wissen', 'auxiliary': 'haben', 'objectCategory': 'information'}),
-    Word(text: 'gekannt', type: 'participle', properties: {'verb': 'kennen', 'auxiliary': 'haben', 'objectCategory': 'person_place_thing'}),
-  ];
-  // API anahtarınızı buraya girin veya çevre değişkeninden alın
-  static const String _geminiApiKey = 'AIzaSyDTbMcxi7Cl0_IFq1XGCUsu818HTlOIDOI';
-  String _currentFeedback = "Hallo! 👋 Ich bin Mari, deine Deutsch-Lehrerin!\n\nBaue zuerst deinen Satz mit den Wörtern oben, dann drücke auf den Button 'An Mari'.\n\nIch analysiere dann deinen Satz Schritt für Schritt! 🎓"; // Almanca başlangıç mesajı
+  
+  // Tüm kelimeler - constants'tan alınıyor
+  List<Word> _allWords = GermanWords.getAllWords();
+  
+  // Gemini servisi - API anahtarı environment variable'dan alınıyor
+  late final GeminiService _geminiService;
+  
+  @override
+  void initState() {
+    super.initState();
+    // API anahtarını .env dosyasından al
+    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+    _geminiService = GeminiService(apiKey: apiKey);
+    // Başlangıç mesajını constants'tan al
+    _currentFeedback = AppConstants.initialFeedback;
+  }
+  
+  String _currentFeedback = AppConstants.initialFeedback; // Almanca başlangıç mesajı
   bool _isLoadingFeedback = false; // Loading durumu için
 
   // Ana cümle için state değişkenleri
@@ -618,7 +214,7 @@ class _SentenceBuilderPageState extends State<SentenceBuilderPage> {
     });
   }
 
-  // Gemini API geri bildirim fonksiyonu (Resmi paket kullanıyor - 400 hatası düzeltildi!)
+  // Gemini API geri bildirim fonksiyonu - Servisi kullan
   Future<String> _getGeminiFeedback(String sentence) async {
     if (sentence.trim().isEmpty) {
       return 'Mari wartet auf deine Auswahl... 🌟';
@@ -626,196 +222,15 @@ class _SentenceBuilderPageState extends State<SentenceBuilderPage> {
 
     final String constructedSentence = _getCurrentSentenceText();
     
-    // Resmi Google Generative AI paketini kullan (Gemini 2.5 - En yeni model!)
-    final model = GenerativeModel(
-      model: 'gemini-2.5-flash', // 2025'in en yeni ve hızlı modeli!
-      apiKey: _geminiApiKey,
-    );
-
-    final prompt = """Hallo! 👋 Ich bin Mari, deine Deutsch-Lehrerin!
-
-Ein Schüler hat einen deutschen Satz gebildet und wartet auf meine detaillierte Analyse. Meine Aufgabe ist es, den Satz **Schritt für Schritt** und **sehr detailliert** auf Deutsch zu analysieren.
-
-📋 **SCHRITT-FÜR-SCHRITT ANALYSE-SCHEMA:**
-
-**1. SATZSTRUKTUR-ANALYSE**
-   • Satztyp bestimmen (Hauptsatz / Nebensatz / zusammengesetzter Satz)
-   • Wortstellung überprüfen:
-     - Hauptsatz: V2-Position (Verb an 2. Stelle?)
-     - Nebensatz: Verb am Ende? (nach weil, dass, ob, als, wenn usw.)
-   • Korrekte Struktur und eventuelle Fehler erklären
-
-**2. SUBJEKT-ANALYSE**
-   • Subjekt identifizieren
-   • Eigenschaften des Subjekts erklären (Person, Singular/Plural, Genus)
-   • Fehler beim Subjekt korrigieren
-
-**3. VERB-ANALYSE**
-   • Infinitiv des Verbs bestimmen
-   • Konjugation für die gewählte Zeit überprüfen
-   • Subjekt-Verb-Kongruenz kontrollieren
-   • Hilfsverb-Verwendung überprüfen (haben/sein/werden)
-   • Korrekte Konjugation erklären
-
-**4. OBJEKT- UND KASUS-ANALYSE**
-   • Objekte im Satz identifizieren
-   • Kasus jedes Objekts überprüfen (Nominativ/Akkusativ/Dativ)
-   • Welchen Kasus verlangt das Verb? (z.B.: helfen → Dativ)
-   • Ist die Artikelverwendung korrekt? (der/die/das, den/die/das, dem/der/dem)
-   • Fehler korrigieren und erklären
-
-**5. ZEIT-ANALYSE**
-   • Gewählte Zeit: ${_selectedTime ?? 'Present'}
-   • Ist die erforderliche Struktur für diese Zeit verwendet?
-   • Perfekt: haben/sein + Partizip II
-   • Präteritum: Vergangenheitskonjugation
-   • Futur: werden + Infinitiv
-   • Fehler korrigieren
-
-**6. GESAMTBEWERTUNG**
-   • Ist der Satz semantisch korrekt?
-   • Was bedeutet der Satz?
-   • Gesamtnote: ⭐⭐⭐⭐⭐ (von 5 Sternen)
-
-**7. VORSCHLÄGE**
-   3-5 Vorschläge zur Verbesserung des Satzes:
-   • Neue Wörter
-   • Nebensatz-Beispiele
-   • Alternative Strukturen
-
-**Beispiel-Analyse:**
-Satz: "Ich habe gestern einen Apfel"
-Zeit: Perfekt
-
-1️⃣ SATZSTRUKTUR: Hauptsatz (V2-Position korrekt) ✓
-2️⃣ SUBJEKT: "Ich" (1. Person Singular) ✓
-3️⃣ VERB: "haben" korrekt konjugiert (habe) ✓
-4️⃣ OBJEKT: "einen Apfel" (Akkusativ, maskulin) ✓
-5️⃣ ZEIT: ❌ FEHLER! Partizip II fehlt für Perfekt
-   → Richtig: "Ich habe gestern einen Apfel **gegessen**"
-   → Erklärung: Perfekt = haben/sein + Partizip II
-6️⃣ BEWERTUNG: Satz zu 70% korrekt, nur Partizip fehlt
-   Bedeutung: "Ich habe gestern einen Apfel gegessen"
-   Note: ⭐⭐⭐⭐☆
-7️⃣ VORSCHLÄGE: gegessen, gekauft, weil ich Hunger hatte, mit Genuss
-
----
-
-📝 **ZU ANALYSIERENDER SATZ:**
-"$constructedSentence"
-
-⏰ **GEWÄHLTE ZEIT:** ${_selectedTime ?? 'Present'}
-
----
-
-Jetzt werde ich diesen Satz mit dem 7-Schritte-Schema detailliert analysieren. Ich erkläre jeden Schritt klar und verständlich auf Deutsch. Los geht's! 🎓""";
-
+    // Gemini servisini kullanarak cümle analizi yap
     try {
-      print('Gemini API çağrısı yapılıyor... Model: gemini-2.5-flash (2025 en yeni!)'); // Debug
-      
-      final content = [Content.text(prompt)];
-      
-      // Safety settings ekle - eğitim amaçlı içerik için
-      final safetySettings = [
-        SafetySetting(HarmCategory.harassment, HarmBlockThreshold.none),
-        SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.none),
-        SafetySetting(HarmCategory.sexuallyExplicit, HarmBlockThreshold.none),
-        SafetySetting(HarmCategory.dangerousContent, HarmBlockThreshold.none),
-      ];
-      
-      final response = await model.generateContent(
-        content,
-        safetySettings: safetySettings,
-        generationConfig: GenerationConfig(
-          temperature: 0.7,
-          maxOutputTokens: 3000, // Detaylı analiz için artırıldı (1000 → 3000)
-        ),
-      ).timeout(const Duration(seconds: 45)); // Detaylı analiz için timeout artırıldı (30→45 saniye)
-
-      // GÜÇLÜ YANIT PARSE MEKANIZMASI
-      print('API yanıtı alındı. Güvenli parse başlıyor...'); // Debug
-      
-      // 1. Candidates kontrolü
-      if (response.candidates.isEmpty) {
-        print('⚠️ Candidates listesi boş'); // Debug
-        if (response.promptFeedback != null) {
-          print('Prompt feedback: ${response.promptFeedback}'); // Debug
-          return '⚠️ Der Inhalt wurde vom Sicherheitsfilter blockiert.\n\nGrund: ${response.promptFeedback?.blockReason ?? "Unbekannt"}\n\nLösung: Versuche einen einfacheren Satz zu bilden.';
-        }
-        return '⚠️ API hat keine Antwort gegeben. Versuche es mit anderen Wörtern.';
-      }
-      
-      final candidate = response.candidates.first;
-      print('Finish reason: ${candidate.finishReason}'); // Debug
-      print('Parts sayısı: ${candidate.content.parts.length}'); // Debug
-      
-      // 2. Finish reason kontrolü
-      if (candidate.finishReason == FinishReason.safety || 
-          candidate.finishReason == FinishReason.recitation) {
-        return '⚠️ Antwort aus Sicherheitsgründen blockiert.\n\nGrund: ${candidate.finishReason}\n\nLösung: Versuche eine andere Satzstruktur.';
-      }
-      
-      // 3. Parts'ı doğrudan TextPart olarak parse et (GÜVENLI YÖNTEM)
-      try {
-        if (candidate.content.parts.isNotEmpty) {
-          for (var part in candidate.content.parts) {
-            print('Part tipi: ${part.runtimeType}'); // Debug
-            
-            if (part is TextPart) {
-              final textPart = part as TextPart;
-              if (textPart.text.isNotEmpty) {
-                print('✅ TextPart ile yanıt alındı (${textPart.text.length} karakter)'); // Debug
-                return textPart.text;
-              }
-            }
-          }
-        }
-        print('⚠️ Hiçbir TextPart bulunamadı'); // Debug
-      } catch (parseError) {
-        print('⚠️ TextPart parse hatası: $parseError'); // Debug
-      }
-      
-      // 4. Son çare: response.text ile dene (try-catch ile)
-      try {
-        final text = response.text;
-        if (text != null && text.isNotEmpty) {
-          print('✅ response.text ile yanıt alındı'); // Debug
-          return text;
-        }
-      } catch (responseTextError) {
-        print('⚠️ response.text hatası: $responseTextError'); // Debug
-      }
-      
-      // 5. Hiçbir şey çalışmadıysa
-      print('❌ Tüm parse yöntemleri başarısız oldu'); // Debug
-      return "⚠️ API hat geantwortet, aber der Text konnte nicht gelesen werden.\n\nFinish reason: ${candidate.finishReason}\nParts: ${candidate.content.parts.length}\n\nBitte versuche es erneut oder wähle andere Wörter.";
-    } on TimeoutException {
-      return '⚠️ Zeitüberschreitung (45 Sekunden).\n\nMögliche Ursachen:\n• Langsame Internetverbindung\n• API-Server ist ausgelastet\n\nLösung: Versuche es erneut oder bilde einen kürzeren Satz.';
-    } on FormatException catch (e) {
-      print('🔴 FormatException: $e'); // Debug
-      return '⚠️ Antwortformat-Fehler!\n\nMögliche Ursachen:\n• API-Antwort nicht im erwarteten Format\n• Inhalt vom Sicherheitsfilter blockiert\n• Neuer API-Schlüssel? Warte 2-3 Minuten\n\nLösung: Versuche es mit anderen Wörtern.';
+      final feedback = await _geminiService.analyzeSentence(
+        constructedSentence,
+        _selectedTime,
+      );
+      return feedback;
     } catch (e) {
-      print('Gemini API hatası: $e'); // Debug
-      print('Hata tipi: ${e.runtimeType}'); // Hata tipini göster
-      
-      // Hata türüne göre kullanıcı dostu mesajlar
-      final errorMsg = e.toString().toLowerCase();
-      
-      if (errorMsg.contains('api_key') || errorMsg.contains('invalid') || errorMsg.contains('401') || errorMsg.contains('403')) {
-        return '⚠️ API-Schlüssel ungültig oder nicht autorisiert.\n\nLösung:\n1. Wenn der Schlüssel neu ist, warte 2-3 Minuten\n2. Überprüfe, ob der Schlüssel aktiv ist\n3. Neuer API-Schlüssel: https://makersuite.google.com/app/apikey';
-      } else if (errorMsg.contains('quota') || errorMsg.contains('429') || errorMsg.contains('resource_exhausted')) {
-        return '⚠️ API-Kontingent überschritten.\n\nLösung:\n1. Warte 1-2 Stunden\n2. Versuche einen anderen API-Schlüssel';
-      } else if (errorMsg.contains('model') || errorMsg.contains('404') || errorMsg.contains('not found')) {
-        return '⚠️ Modell nicht gefunden.\n\nModell: gemini-2.5-flash\n\nLösung: Schließe die App vollständig und öffne sie erneut.';
-      } else if (errorMsg.contains('network') || errorMsg.contains('connection') || errorMsg.contains('socket')) {
-        return '⚠️ Internetverbindungsproblem.\n\nLösung:\n1. Überprüfe deine WLAN/Mobilfunkverbindung\n2. Deaktiviere VPN falls aktiv';
-      } else if (errorMsg.contains('blocked') || errorMsg.contains('safety') || errorMsg.contains('recitation')) {
-        return '⚠️ Inhalt vom Sicherheitsfilter blockiert.\n\nLösung: Versuche andere Wörter oder einen einfacheren Satz.';
-      } else if (errorMsg.contains('format')) {
-        return '⚠️ Datenformat-Fehler.\n\nDetails: $e\n\nLösung:\n1. Starte die App neu\n2. Überprüfe den API-Schlüssel\n3. Überprüfe die Internetverbindung';
-      } else {
-        return '⚠️ Unerwarteter Fehler:\n\nFehler: ${e.runtimeType}\nDetails: $e\n\nLösung:\n1. Starte die App neu\n2. Überprüfe den API-Schlüssel\n3. Versuche einen anderen API-Schlüssel';
-      }
+      return 'Hata: ${e.toString()}';
     }
   }
 
