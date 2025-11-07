@@ -155,44 +155,13 @@ class _SentenceBuilderPageState extends State<SentenceBuilderPage> {
     return currentSentenceParts.join(' ');
   }
 
-  Future<void> _listGeminiModels() async {
-    final String url = 'https://generativelanguage.googleapis.com/v1beta/models?key=$_geminiApiKey';
-    print('Gemini ListModels API URL: $url');
 
-    try {
-      final response = await http.get(Uri.parse(url));
-
-      print('Gemini ListModels Yanıt Durum Kodu: ${response.statusCode}');
-      print('Gemini ListModels Yanıt Gövdesi: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        final List<dynamic> models = data['models'] ?? [];
-        for (var model in models) {
-          print('Model Adı: ${model['name']}, Desteklenen Metotlar: ${model['supportedGenerationMethods']}');
-        }
-      } else {
-        print('ListModels API hatası: ${response.statusCode} - ${response.body}');
-      }
-    } catch (e) {
-      print('ListModels API isteği sırasında bir hata oluştu: $e');
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    print('initState çağrıldı.'); // Debug print
-    _selectedTime = 'Present'; // Varsayılan olarak şimdiki zamanı ayarla
-    _filterWords(); // Başlangıçta kelimeleri filtrele
-    // _updateFeedback() kaldırıldı - artık sadece butona basınca çağrılacak
-  }
 
   void _clearSentence() {
     setState(() {
       _filterWords(); // Kelime seçeneklerini güncelle
       // Feedback'i başlangıç mesajına sıfırla
-      _currentFeedback = "Hallo! 👋 Ich bin Mari, deine Deutsch-Lehrerin!\n\nBaue zuerst deinen Satz mit den Wörtern oben, dann drücke auf den Button 'An Mari'.\n\nIch analysiere dann deinen Satz Schritt für Schritt! 🎓";
+      _currentFeedback = AppConstants.initialFeedback;
       _isLoadingFeedback = false;
       // Ana cümle
       _selectedSubject = null;
