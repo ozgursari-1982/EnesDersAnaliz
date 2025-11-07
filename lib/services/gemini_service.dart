@@ -7,9 +7,9 @@ class GeminiService {
   late final GenerativeModel _model;
 
   GeminiService({required this.apiKey}) {
-    // Gemini modelini başlat - gemini-1.5-flash kullan (hızlı ve güvenilir)
+    // Gemini modelini başlat - gemini-2.0-flash-exp kullan (en yeni ve güçlü)
     _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.0-flash-exp',
       apiKey: apiKey,
     );
   }
